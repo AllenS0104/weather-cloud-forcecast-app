@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>天气地图 + 云海分析</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { font-family: "Segoe UI", sans-serif; margin: 0; padding: 0; background-size: cover; background-position: center; transition: background 1s ease-in-out; color: #222; }
+  #container { background: rgba(255, 255, 255, 0.9); padding: 20px; max-width: 960px; margin: 20px auto; border-radius: 12px; box-shadow: 0 0 10px rgba(0,0,0,0.2); }
+  h1 { text-align: center; }
+  #map { height: 300px; border-radius: 10px; }
+  
+  #search-box { 
+    margin: 10px 0; 
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  #search-box input, #search-box select, #search-box button { 
+    padding: 8px 12px; 
+    font-size: 16px; 
+    border: 1px solid #ccc;
+    border-radius: 5px;
+  }
+  #search-box input { flex-grow: 1; max-width: 300px; }
+
+  #search-box button {
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+    transition: background-color 0.2s;
+  }
+  #search-box button:hover {
+    background-color: #0056b3;
+  }
+  #locate-btn {
+      background-color: #28a745;
+      border-color: #28a745;
+  }
+  #locate-btn:hover {
+      background-color: #218838;
+  }
+  
+  #weather p { line-height: 1.6; }
+  .label { font-weight: bold; }
+  .error-message { color: red; font-weight: bold; }
+  canvas { max-width: 100%; margin-top: 30px; }
+  #rainChart { max-height: 150px; }
+</style>
+</head>
+<body>
+<div id="container">
+  <h1>🌤️ 天气地图 + 云海预测</h1>
+  <div id="search-box">
+    <input type="text" id="address" placeholder="请输入地点 (默认: 北京)" onkeydown="if(event.key==='Enter') searchAddress()">
+    <button onclick="searchAddress()">确认</button>
+    <button id="locate-btn" onclick="locateAndFetch()">当前位置</button>
+    <select id="daySelector" onchange="dayChanged()"></select>
+  </div>
+  <div id="map"></div>
+  <div id="weather">加载中...</div>
+  <canvas id="cloudChart"></canvas>
+  <canvas id="rainChart"></canvas>
+</div>
+<script>
+// 默认坐标（北京）
+let lat = 39.9042, lon = 116.4074;
+let map, marker, cloudChart, rainChart;
+let selectedDayIndex = 0;
+let elevation = 300;
+let lastWeatherData = null;
+
+const API_ENDPOINTS = [
+    'https://api.open-meteo.com',
+    'https://ensemble-api.open-meteo.com'
+];
+
+async function getRealElevation(lat, lon) {
+  try {
+    const res = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`);
+    if (!res.ok) throw new Error(`海拔API错误: ${res.status} ${res.statusText}`);
+    const data = await res.json();
+    if (data.results && data.results.length > 0) return data.results[0].elevation;
+    throw new Error("海拔API未返回有效结果");
+  } catch (e) {
+    console.error("海拔获取失败:", e);
+    document.getElementById("weather").innerHTML = `<p class="error-message">获取海拔失败，将使用默认值。错误: ${e.message}</p>`;
+    return 300;
+  }
+}
+
+function windDirection(deg) {
+  const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+  return dirs[Math.round(deg / 45) % 8] + '风';
+}
+
+function setBackgroundByTimeFromWeather(timeStr) {
+  const hour = new Date(timeStr).getHours();
+  const dayImg = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1950&q=80";
+  const nightImg = "https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80";
+  document.body.style.backgroundImage = `url(${hour >= 6 && hour < 18 ? dayImg : nightImg})`;
+}
+
+function initMap() {
+  map = L.map('map').setView([lat, lon], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+  marker = L.marker([lat, lon]).addTo(map);
+  map.on('click', e => {
+    lat = e.latlng.lat;
+    lon = e.latlng.lng;
+    marker.setLatLng(e.latlng);
+    fetchWeatherAndElevation();
+  });
+}
+
+async function searchAddress() {
+  const addr = document.getElementById("address").value.trim();
+  if (!addr) return;
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`);
+    if (!res.ok) throw new Error(`地址查询服务错误: ${res.status}`);
+    const data = await res.json();
+    if (data.length > 0) {
+      lat = parseFloat(data[0].lat);
+      lon = parseFloat(data[0].lon);
+      map.setView([lat, lon], 9);
+      marker.setLatLng([lat, lon]);
+      fetchWeatherAndElevation();
+    } else {
+      alert("未找到该地址，请尝试其他关键词。");
+    }
+  } catch (e) {
+    alert(`地址查询失败: ${e.message}`);
+  }
+}
+
+function populateDateSelector(hourlyTime) {
+    const selector = document.getElementById("daySelector");
+    const firstDay = hourlyTime[0].split('T')[0];
+    if (selector.options.length > 0 && selector.options[0].dataset.day === firstDay) {
+        selector.value = selectedDayIndex;
+        return;
+    }
+    selector.innerHTML = "";
+    const uniqueDays = [...new Set(hourlyTime.map(t => t.split('T')[0]))];
+    uniqueDays.slice(0, 7).forEach((day, index) => {
+        const opt = document.createElement("option");
+        opt.value = index;
+        opt.dataset.day = day;
+        opt.textContent = new Date(day).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+        if (index === 0) opt.textContent += " (今天)";
+        selector.appendChild(opt);
+    });
+    selector.value = selectedDayIndex;
+}
+
+function dayChanged() {
+    selectedDayIndex = parseInt(document.getElementById("daySelector")?.value || 0);
+    if(lastWeatherData) {
+        updateDisplay(lastWeatherData);
+    }
+}
+
+async function fetchWeatherAndElevation() {
+    document.getElementById("weather").innerHTML = "正在获取海拔数据...";
+    elevation = await getRealElevation(lat, lon);
+    fetchWeatherWithFailover();
+}
+
+function fetchWeatherWithFailover(apiIndex = 0) {
+    if (apiIndex >= API_ENDPOINTS.length) {
+        document.getElementById("weather").innerHTML = `<p class="error-message">所有天气数据源均请求失败。请检查网络连接或稍后再试。</p>`;
+        return;
+    }
+    const baseApiUrl = API_ENDPOINTS[apiIndex];
+    document.getElementById("weather").innerHTML = `正在从数据源 ${apiIndex + 1} 加载天气数据...`;
+    
+    const params = new URLSearchParams({
+        latitude: lat,
+        longitude: lon,
+        current: 'temperature_2m,relative_humidity_2m,cloudcover,visibility,wind_speed_10m,wind_direction_10m',
+        hourly: 'temperature_2m,relative_humidity_2m,cloudcover,cloudcover_low,precipitation,visibility,wind_speed_10m,wind_direction_10m,precipitation_probability',
+        daily: 'sunrise,sunset',
+        timezone: 'Asia/Shanghai'
+    });
+    const url = `${baseApiUrl}/v1/forecast?${params.toString()}`;
+
+    fetch(url)
+    .then(res => {
+      if (!res.ok) throw new Error(`天气API请求失败: ${res.status} ${res.statusText}`);
+      return res.json();
+    })
+    .then(data => {
+      if (!data || !data.hourly || !data.hourly.time) throw new Error("天气API返回的数据格式不完整或无效。");
+      lastWeatherData = data;
+      populateDateSelector(data.hourly.time);
+      updateDisplay(data);
+    })
+    .catch(error => {
+      console.error(`数据源 ${apiIndex + 1} (${baseApiUrl}) 请求失败:`, error);
+      fetchWeatherWithFailover(apiIndex + 1);
+    });
+}
+
+function updateDisplay(data) {
+    const hourly = data.hourly;
+    const daily = data.daily;
+    const start = selectedDayIndex * 24;
+
+    const displayIndexForBg = start;
+    if (displayIndexForBg >= hourly.time.length) return;
+    setBackgroundByTimeFromWeather(hourly.time[displayIndexForBg]);
+    
+    let weatherHtml = `<p><span class="label">📍 坐标：</span>${lat.toFixed(4)}, ${lon.toFixed(4)} (海拔: ${elevation}米)</p>`;
+    
+    if (selectedDayIndex === 0 && data.current) {
+        const current = data.current;
+        const temp = current.temperature_2m;
+        const humidity = current.relative_humidity_2m;
+        const cloudcover = current.cloudcover;
+        const windSpeed = current.wind_speed_10m;
+        const windDir = current.wind_direction_10m;
+        const visibility = current.visibility / 1000;
+        const td = temp - ((100 - humidity) / 5);
+        const cloudBase = Math.round((temp - td) * 125);
+        const suggestion = (cloudBase < elevation && humidity > 85 && visibility > 8) ? "🌫️ 云底低于地形，有很大概率出现云海！" : "🌥️ 云海出现可能性不大";
+        weatherHtml += `<p><span class="label">🌡️ 当前温度：</span>${temp.toFixed(1)}°C</p><p><span class="label">💧 当前湿度：</span>${humidity.toFixed(0)}%</p><p><span class="label">☁️ 当前云量：</span>${cloudcover.toFixed(0)}%</p><p><span class="label">🌬️ 当前风速：</span>${windSpeed.toFixed(1)} m/s，${windDirection(windDir)}</p><p><span class="label">👁️ 当前能见度：</span>${visibility.toFixed(1)} 公里</p><p><span class="label">🌫️ 云底高度 (基于当前)：</span>${cloudBase.toFixed(0)} 米</p><p><span class="label">⛰️ 云海预测 (基于当前)：</span>${suggestion}</p>`;
+    } else {
+        const dayTemps = hourly.temperature_2m.slice(start, start + 24);
+        const dayHums = hourly.relative_humidity_2m.slice(start, start + 24);
+        const dayClouds = hourly.cloudcover.slice(start, start + 24);
+        const dayWinds = hourly.wind_speed_10m.slice(start, start + 24);
+        const dayVis = hourly.visibility.slice(start, start + 24);
+        const dayBases = dayTemps.map((t, i) => { const h = dayHums[i]; const td = t - ((100 - h) / 5); return Math.round((t - td) * 125); });
+        const minTemp = Math.min(...dayTemps);
+        const maxTemp = Math.max(...dayTemps);
+        const minHum = Math.min(...dayHums);
+        const maxHum = Math.max(...dayHums);
+        const minCloud = Math.min(...dayClouds);
+        const maxCloud = Math.max(...dayClouds);
+        const minWind = Math.min(...dayWinds);
+        const maxWind = Math.max(...dayWinds);
+        const minVis = Math.min(...dayVis) / 1000;
+        const maxVis = Math.max(...dayVis) / 1000;
+        const minBase = Math.min(...dayBases);
+        const maxBase = Math.max(...dayBases);
+        const suggestion = (minBase < elevation && maxHum > 85 && maxVis > 8) ? "🌫️ 云底低于地形，有很大概率出现云海！" : "🌥️ 云海出现可能性不大";
+        weatherHtml += `<p><span class="label">🌡️ 温度范围 (全天)：</span>${minTemp.toFixed(1)}°C ~ ${maxTemp.toFixed(1)}°C</p><p><span class="label">💧 湿度范围 (全天)：</span>${minHum.toFixed(0)}% ~ ${maxHum.toFixed(0)}%</p><p><span class="label">☁️ 云量范围 (全天)：</span>${minCloud.toFixed(0)}% ~ ${maxCloud.toFixed(0)}%</p><p><span class="label">🌬️ 风速范围 (全天)：</span>${minWind.toFixed(1)} m/s ~ ${maxWind.toFixed(1)} m/s</p><p><span class="label">👁️ 能见度范围 (全天)：</span>${minVis.toFixed(1)} km ~ ${maxVis.toFixed(1)} km</p><p><span class="label">🌫️ 云底高度范围 (全天)：</span>${minBase.toFixed(0)} m ~ ${maxBase.toFixed(0)} m</p><p><span class="label">⛰️ 云海预测 (基于全天)：</span>${suggestion}</p>`;
+    }
+    
+    const dayPrecipProbs = hourly.precipitation_probability.slice(start, start + 24);
+    const maxPrecipProb = Math.max(...dayPrecipProbs);
+    const sunrise = daily.sunrise[selectedDayIndex]?.slice(11) || 'N/A';
+    const sunset = daily.sunset[selectedDayIndex]?.slice(11) || 'N/A';
+    
+    weatherHtml += `<p><span class="label">🌧️ 降水概率：</span>${maxPrecipProb}% (全天最高)</p><p><span class="label">🌅 日出：</span>${sunrise}，🌇 日落：${sunset}</p>`;
+
+    document.getElementById("weather").innerHTML = weatherHtml;
+
+    const hours = hourly.time.slice(start, start + 24).map(t => new Date(t).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }));
+    const cloud = hourly.cloudcover.slice(start, start + 24);
+    const rain = hourly.precipitation.slice(start, start + 24);
+    const lowCloud = hourly.cloudcover_low.slice(start, start + 24);
+    const temps = hourly.temperature_2m.slice(start, start + 24);
+    const hums = hourly.relative_humidity_2m.slice(start, start + 24);
+    const bases = temps.map((t, i) => { const currentHum = hums[i] || 0; const currentTempTd = t - ((100 - currentHum) / 5); return Math.round((t - currentTempTd) * 125); });
+
+    if (cloudChart) cloudChart.destroy();
+    cloudChart = new Chart(document.getElementById("cloudChart"), { type: 'line', data: { labels: hours, datasets: [ { label: "☁️ 云量 (%)", data: cloud, borderColor: "#4682B4", backgroundColor: "rgba(70,130,180,0.2)", yAxisID: 'y1', fill: true }, { label: "🌫️ 云底高度 (m)", data: bases, borderColor: "#FF6384", backgroundColor: "rgba(255,99,132,0.2)", yAxisID: 'y2', fill: false }, { label: "🌥️ 低云覆盖率 (%)", data: lowCloud, borderColor: "#9ACD32", backgroundColor: "rgba(154,205,50,0.2)", yAxisID: 'y1', fill: false }] }, options: { responsive: true, scales: { y1: { position: 'left', beginAtZero: true, max: 100, title: { display: true, text: '云量 (%)' } }, y2: { position: 'right', beginAtZero: true, title: { display: true, text: '云底高度 (m)' }, grid: { drawOnChartArea: false } }, }, interaction: { mode: 'index', intersect: false }, plugins: { tooltip: { mode: 'index', intersect: false } } } });
+    if (rainChart) rainChart.destroy();
+    rainChart = new Chart(document.getElementById("rainChart"), { type: 'bar', data: { labels: hours, datasets: [{ label: '🌧️ 降雨 (mm)', data: rain, backgroundColor: 'rgba(0, 180, 150, 0.6)' }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+}
+
+function locateAndFetch() {
+    document.getElementById("weather").innerHTML = "正在获取您的当前位置...";
+    navigator.geolocation.getCurrentPosition(pos => {
+      lat = pos.coords.latitude;
+      lon = pos.coords.longitude;
+      map.setView([lat, lon], 9);
+      marker.setLatLng([lat, lon]);
+      fetchWeatherAndElevation();
+    }, () => {
+        alert("定位失败！浏览器可能没有权限或无法获取位置。");
+        console.log("定位失败");
+    });
+}
+
+// --- 初始加载 ---
+initMap();
+// 修复点：不再自动调用 locateAndFetch()，避免启动时就弹窗
+// locateAndFetch(); 
+// 直接加载默认地点的天气
+fetchWeatherAndElevation();
+
+</script>
+</body>
+</html>```
