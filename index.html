@@ -116,38 +116,15 @@ function setBackgroundByTime(timeStr) { const hour = new Date(timeStr).getHours(
 
 // --- 地图和控件交互 ---
 function initMap() {
-    // --- 修复点：引入 OpenTopoMap 地形图 ---
-    const gaode = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
-        subdomains: ["1", "2", "3", "4"],
-        attribution: '高德地图'
-    });
-    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-        attribution: 'Map data: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: © <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
-    });
-    const esri_satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Esri'
-    });
-    const carto_light = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: 'CARTO',
-        subdomains: 'abcd',
-    });
-
-    const baseLayers = {
-        "高德地图 (中文)": gaode,
-        "地形图 (户外)": topo,
-        "高清卫星图": esri_satellite,
-        "简洁地图 (英文)": carto_light,
-    };
-
+    const gaode = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ["1", "2", "3", "4"], attribution: '高德地图' });
+    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)' });
+    const esri_satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+    const carto_light = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: 'CARTO', subdomains: 'abcd' });
+    const baseLayers = { "高德地图 (中文)": gaode, "地形图 (户外)": topo, "高清卫星图": esri_satellite, "简洁地图 (英文)": carto_light };
     map = L.map('map', { layers: [gaode] }).setView([lat, lon], 6);
     L.control.layers(baseLayers).addTo(map);
     marker = L.marker([lat, lon]).addTo(map);
-    map.on('click', e => {
-        lat = e.latlng.lat;
-        lon = e.latlng.lng;
-        marker.setLatLng(e.latlng);
-        fetchWeatherAndElevation();
-    });
+    map.on('click', e => { lat = e.latlng.lat; lon = e.latlng.lng; marker.setLatLng(e.latlng); fetchWeatherAndElevation(); });
 }
 
 async function searchAddress() { const addr = getEl("address").value.trim(); if (!addr) return; try { const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`); if (!res.ok) throw new Error(`地址查询服务错误`); const data = await res.json(); if (data.length > 0) { lat = parseFloat(data[0].lat); lon = parseFloat(data[0].lon); map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); } else { alert("未找到该地址"); } } catch (e) { alert(`地址查询失败: ${e.message}`); }}
@@ -180,8 +157,14 @@ function updateDisplay(data) {
     for(let i=0; i < 24; i++) {
         const hourIndex = start + i; if(hourIndex >= hourly.time.length) break;
         const time = new Date(hourly.time[hourIndex]).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const temp = hourly.temperature_2m[hourIndex] || 0; const precipProb = hourly.precipitation_probability[hourIndex] || 0;
-        const hum = hourly.relative_humidity_2m[hourIndex] || 0; const base = Math.round((temp - ((100-hum)/5)) * 125);
+        const temp = hourly.temperature_2m[hourIndex] || 0; 
+        const precipProb = hourly.precipitation_probability[hourIndex] || 0;
+        const hum = hourly.relative_humidity_2m[hourIndex] || 0;
+        
+        // --- 修复点：使用统一的、正确的公式 ---
+        const td = temp - ((100 - hum) / 5);
+        const base = Math.round((temp - td) * 125);
+        
         hourlyHtml += `<div class="hour-item"><div class="time">${time}</div><div class="stat"><span class="icon">🌡️</span>${temp.toFixed(1)}°C</div><div class="stat"><span class="icon">🌫️</span>${base} m</div><div class="stat"><span class="icon">💦</span>${precipProb}%</div></div>`;
     }
     getEl('hourly-forecast-list').innerHTML = hourlyHtml || '<div class="loading">暂无逐小时数据</div>';
