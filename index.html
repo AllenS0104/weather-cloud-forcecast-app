@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>天气地图 + 云海分析</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<!-- PWA Manifest -->
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -46,9 +45,10 @@
   .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); display: none; justify-content: center; align-items: center; z-index: 1000; animation: fadeIn 0.3s; }
   .modal-content { background: #fff; color: #333; padding: 30px; border-radius: 16px; text-align: center; max-width: 90%; width: 500px; box-shadow: 0 0 50px rgba(255,0,0,0.5); }
   .modal-content h2 { color: var(--error-color); font-size: 2.5rem; margin-top: 0; }
-  .modal-content .coord-info { font-size: 1.8rem; font-weight: 600; margin: 20px 0; line-height: 1.5; }
-  .modal-content p { color: #666; }
-  .modal-button { display: inline-block; padding: 12px 25px; margin: 10px; font-size: 1.1rem; border-radius: 8px; border: none; cursor: pointer; }
+  #sos-info { font-size: 1.2rem; font-weight: 600; margin: 20px 0; line-height: 1.6; background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: left; white-space: pre-wrap; }
+  .modal-button { display: inline-block; padding: 12px 25px; margin: 10px; font-size: 1.1rem; border-radius: 8px; border: none; cursor: pointer; text-decoration: none; }
+  #prepare-sos-btn { background-color: var(--error-color); color: white; width: 80%; }
+  #sos-actions a { margin-top: 10px; }
   #copy-sos-btn { background-color: var(--accent-color); color: white; }
   #close-sos-btn { background-color: #ccc; color: #333; }
 </style>
@@ -85,13 +85,14 @@
 <!-- SOS Modal Structure -->
 <div id="sos-modal" class="modal-overlay">
   <div class="modal-content">
-    <h2>紧急求救信息</h2>
-    <p>请将以下信息告知救援人员！即使没有网络，此信息也可能通过GPS获取。</p>
-    <div id="sos-info" class="coord-info">正在获取您的位置...</div>
-    <p>
-      <button id="copy-sos-btn" class="modal-button">复制求救信息</button>
-      <button id="close-sos-btn" class="modal-button">关闭</button>
-    </p>
+    <h2 id="sos-title">紧急求救</h2>
+    <p id="sos-instruction">点击下方按钮，准备生成包含您当前位置的求救信息。</p>
+    <div id="sos-info-container" style="display: none;">
+      <pre id="sos-info"></pre>
+      <div id="sos-actions"></div>
+    </div>
+    <button id="prepare-sos-btn" class="modal-button">准备求救信号</button>
+    <button id="close-sos-btn" class="modal-button">关闭</button>
   </div>
 </div>
 
@@ -122,9 +123,7 @@ function fetchWeatherWithFailover(apiIndex = 0) { if (apiIndex >= API_ENDPOINTS.
 
 // --- 核心：更新显示 ---
 function updateDisplay(data) {
-    const hourly = data.hourly;
-    const daily = data.daily;
-    const start = selectedDayIndex * 24;
+    const hourly = data.hourly, daily = data.daily, start = selectedDayIndex * 24;
     setBackgroundByTime(hourly.time[start]);
     let weatherHtml;
     if (selectedDayIndex === 0 && data.current) {
@@ -151,32 +150,72 @@ function updateDisplay(data) {
     getEl('hourly-forecast-list').innerHTML = hourlyHtml || '<div class="loading">暂无逐小时数据</div>';
 }
 
-// --- SOS功能 ---
+// --- SOS功能 V2.0 ---
 const sosModal = getEl('sos-modal');
-const sosInfo = getEl('sos-info');
-const copySosBtn = getEl('copy-sos-btn');
-const closeSosBtn = getEl('close-sos-btn');
-
-function showSosModal() {
-    sosModal.style.display = 'flex';
-    sosInfo.innerHTML = '正在获取您的GPS位置...';
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-        const sosLat = pos.coords.latitude;
-        const sosLon = pos.coords.longitude;
-        const sosTime = new Date().toLocaleString('zh-CN');
-        const sosElevation = await getRealElevation(sosLat, sosLon);
-        const sosText = `紧急求救！\n经度: ${sosLat.toFixed(6)}\n纬度: ${sosLon.toFixed(6)}\n海拔: ${sosElevation}米\n时间: ${sosTime}`;
-        sosInfo.innerText = sosText;
-    }, (err) => {
-        sosInfo.innerText = `GPS定位失败！\n错误: ${err.message}\n请尝试移动到开阔地带。`;
-    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+function resetSosModal() {
+    getEl('sos-title').innerText = '紧急求救';
+    getEl('sos-instruction').style.display = 'block';
+    getEl('sos-instruction').innerText = '点击下方按钮，准备生成包含您当前位置的求救信息。';
+    getEl('prepare-sos-btn').style.display = 'block';
+    getEl('sos-info-container').style.display = 'none';
+    getEl('sos-info').innerText = '';
+    getEl('sos-actions').innerHTML = '';
 }
-copySosBtn.onclick = () => {
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(sosInfo.innerText).then(() => alert('求救信息已复制到剪贴板！'), () => alert('复制失败！'));
-    } else { alert('您的浏览器不支持自动复制。'); }
+function showSosModal() {
+    resetSosModal();
+    sosModal.style.display = 'flex';
+}
+getEl('prepare-sos-btn').onclick = function() {
+    this.style.display = 'none';
+    getEl('sos-instruction').innerText = '正在获取您的GPS位置，请稍候...';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        const sosLat = pos.coords.latitude, sosLon = pos.coords.longitude;
+        const sosTime = new Date().toLocaleString('zh-CN');
+        const [sosElevation, locationName] = await Promise.all([
+            getRealElevation(sosLat, sosLon),
+            (async () => {
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${sosLat}&lon=${sosLon}&accept-language=zh-CN`);
+                    return (await res.json()).display_name || 'N/A (离线)';
+                } catch (e) { return 'N/A (离线)'; }
+            })()
+        ]);
+        
+        const sosText = `
+紧急求救 (SOS)
+--------------------
+📍 位置描述:
+${locationName}
+--------------------
+🛰️ 精确坐标:
+纬度: ${sosLat.toFixed(6)}
+经度: ${sosLon.toFixed(6)}
+--------------------
+⛰️ 海拔高度: ${sosElevation} 米
+--------------------
+🕒 时间: ${sosTime}
+        `.trim();
+
+        getEl('sos-instruction').style.display = 'none';
+        getEl('sos-info').innerText = sosText;
+        getEl('sos-info-container').style.display = 'block';
+        
+        const encodedText = encodeURIComponent(sosText);
+        getEl('sos-actions').innerHTML = `
+            <a href="sms:?body=${encodedText}" class="modal-button" style="background-color: var(--success-color); color: white;">通过短信发送</a>
+            <a href="mailto:?subject=紧急求救 (SOS)&body=${encodedText}" class="modal-button" style="background-color: var(--accent-color); color: white;">通过邮件发送</a>
+            <button id="copy-sos-btn" class="modal-button" style="background-color: #6c757d; color: white;">复制文本</button>
+        `;
+
+        getEl('copy-sos-btn').onclick = () => {
+            navigator.clipboard.writeText(sosText).then(() => alert('求救信息已复制！'), () => alert('复制失败！'));
+        };
+
+    }, (err) => {
+        getEl('sos-instruction').innerText = `GPS定位失败！\n错误: ${err.message}\n请移到开阔地带，或检查手机定位权限。`;
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 };
-closeSosBtn.onclick = () => { sosModal.style.display = 'none'; };
+getEl('close-sos-btn').onclick = () => { sosModal.style.display = 'none'; };
 
 // --- 定位和初始加载 ---
 function locateAndFetch() { getEl('weather-dashboard').innerHTML = `<div class="loading">正在获取您的当前位置...</div>`; navigator.geolocation.getCurrentPosition(pos => { lat = pos.coords.latitude; lon = pos.coords.longitude; map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); }, () => { alert("定位失败！"); fetchWeatherAndElevation(); });}
@@ -184,15 +223,7 @@ initMap();
 fetchWeatherAndElevation();
 
 // --- PWA Service Worker 注册 ---
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(registration => {
-            console.log('ServiceWorker 注册成功: ', registration.scope);
-        }, err => {
-            console.log('ServiceWorker 注册失败: ', err);
-        });
-    });
-}
+if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').then(reg => console.log('ServiceWorker 注册成功'), err => console.log('ServiceWorker 注册失败:', err)); }); }
 </script>
 </body>
 </html>
