@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>天气地图 + 云海分析</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- PWA Manifest -->
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary-bg: rgba(20, 20, 30, 0.6); --border-color: rgba(255, 255, 255, 0.2); --text-color: #EAEAEA;
+    --text-muted-color: #AAB; --accent-color: #0095ff; --success-color: #28a745; --error-color: #dc3545;
+    --success-bg-color: rgba(40, 167, 69, 0.2); --neutral-color: #6c757d; --neutral-bg-color: rgba(108, 117, 125, 0.2);
+  }
+  body { font-family: 'Poppins', sans-serif; margin: 0; padding: 20px; background-image: url('https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80'); background-size: cover; background-position: center; background-attachment: fixed; color: var(--text-color); transition: background-image 1s ease-in-out; }
+  .card { background: var(--primary-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 25px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2); animation: fadeIn 0.5s ease-in-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  #app-container { max-width: 1200px; margin: 0 auto; display: grid; gap: 20px; }
+  h1 { text-align: center; margin-bottom: 10px; font-weight: 600; }
+  #controls-section { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; }
+  #controls-section input, #controls-section select, #controls-section button { padding: 10px 15px; font-size: 16px; font-family: 'Poppins', sans-serif; border: 1px solid var(--border-color); border-radius: 8px; background-color: rgba(255, 255, 255, 0.1); color: var(--text-color); }
+  #controls-section button { cursor: pointer; background-color: var(--accent-color); border-color: var(--accent-color); transition: background-color 0.2s; }
+  #locate-btn { background-color: var(--success-color); border-color: var(--success-color); }
+  #main-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }
+  #map { height: 250px; border-radius: 12px; margin-bottom: 20px; }
+  .weather-main { text-align: center; margin-bottom: 20px; }
+  .weather-main .temp { font-size: 3.5rem; font-weight: 600; line-height: 1; }
+  .weather-main .location { font-size: 1.2rem; font-weight: 400; color: var(--text-muted-color); }
+  .weather-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+  .stat-card { background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 10px; display: flex; align-items: center; gap: 10px; }
+  .stat-card .icon { font-size: 1.5rem; } .stat-card .label { font-size: 0.9rem; color: var(--text-muted-color); } .stat-card .value { font-size: 1.1rem; font-weight: 500; }
+  .forecast-card { margin-top: 20px; text-align: center; } .forecast-card .title { font-size: 1.2rem; font-weight: 500; margin-bottom: 10px; } .forecast-card .result { font-size: 1.5rem; font-weight: 600; padding: 10px; border-radius: 8px; }
+  .forecast-card.positive .result { color: var(--success-color); background: var(--success-bg-color); } .forecast-card.negative .result { color: var(--neutral-color); background: var(--neutral-bg-color); }
+  #hourly-section h2 { text-align: center; margin-top: 0; font-weight: 500; }
+  #hourly-forecast-list { max-height: 380px; overflow-y: auto; padding-right: 10px; }
+  .hour-item { display: grid; grid-template-columns: 60px 1fr 1fr 1fr; gap: 15px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border-color); }
+  .hour-item:last-child { border-bottom: none; } .hour-item .time { font-weight: 600; font-size: 1.1rem; } .hour-item .stat { display: flex; align-items: center; gap: 5px; font-size: 0.95rem; }
+  #sos-button { display: block; width: 100%; padding: 15px; margin-top: 20px; font-size: 1.2rem; font-weight: 600; color: white; background-color: var(--error-color); border: none; border-radius: 8px; cursor: pointer; transition: transform 0.2s; }
+  #sos-button:hover { transform: scale(1.02); }
+  /* SOS Modal Styles */
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.8); display: none; justify-content: center; align-items: center; z-index: 1000; animation: fadeIn 0.3s; }
+  .modal-content { background: #fff; color: #333; padding: 30px; border-radius: 16px; text-align: center; max-width: 90%; width: 500px; box-shadow: 0 0 50px rgba(255,0,0,0.5); }
+  .modal-content h2 { color: var(--error-color); font-size: 2.5rem; margin-top: 0; }
+  .modal-content .coord-info { font-size: 1.8rem; font-weight: 600; margin: 20px 0; line-height: 1.5; }
+  .modal-content p { color: #666; }
+  .modal-button { display: inline-block; padding: 12px 25px; margin: 10px; font-size: 1.1rem; border-radius: 8px; border: none; cursor: pointer; }
+  #copy-sos-btn { background-color: var(--accent-color); color: white; }
+  #close-sos-btn { background-color: #ccc; color: #333; }
+</style>
+</head>
+<body>
+
+<div id="app-container">
+  <header class="card">
+    <h1>🌤️ 天气地图 + 云海预测</h1>
+    <div id="controls-section">
+      <input type="text" id="address" placeholder="输入地点 (默认: 北京)" onkeydown="if(event.key==='Enter') searchAddress()">
+      <button onclick="searchAddress()">确认</button>
+      <button id="locate-btn" onclick="locateAndFetch()">📍 当前位置</button>
+      <select id="daySelector" onchange="dayChanged()"></select>
+    </div>
+  </header>
+  
+  <main id="main-content">
+    <section id="left-panel" class="card">
+      <div id="map"></div>
+      <div id="weather-dashboard"><div class="loading">正在加载...</div></div>
+    </section>
+
+    <section id="right-panel" class="card">
+      <div id="hourly-section">
+        <h2>逐小时预报</h2>
+        <div id="hourly-forecast-list"></div>
+      </div>
+      <button id="sos-button" onclick="showSosModal()">🆘 SOS 紧急求救</button>
+    </section>
+  </main>
+</div>
+
+<!-- SOS Modal Structure -->
+<div id="sos-modal" class="modal-overlay">
+  <div class="modal-content">
+    <h2>紧急求救信息</h2>
+    <p>请将以下信息告知救援人员！即使没有网络，此信息也可能通过GPS获取。</p>
+    <div id="sos-info" class="coord-info">正在获取您的位置...</div>
+    <p>
+      <button id="copy-sos-btn" class="modal-button">复制求救信息</button>
+      <button id="close-sos-btn" class="modal-button">关闭</button>
+    </p>
+  </div>
+</div>
+
+<script>
+let map, marker;
+let lat = 39.9042, lon = 116.4074;
+let selectedDayIndex = 0;
+let elevation = 300;
+let lastWeatherData = null;
+
+const API_ENDPOINTS = ['https://api.open-meteo.com', 'https://ensemble-api.open-meteo.com'];
+
+// --- 辅助函数 ---
+const getEl = (id) => document.getElementById(id);
+async function getRealElevation(lat, lon) { try { const res = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`); if (!res.ok) throw new Error(`海拔API错误`); return (await res.json()).results?.[0]?.elevation || 300; } catch (e) { console.error("海拔获取失败:", e); return 300; } }
+function windDirection(deg) { const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']; return dirs[Math.round(deg / 45) % 8] + '风';}
+function setBackgroundByTime(timeStr) { const hour = new Date(timeStr).getHours(); const dayImg = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1950&q=80"; const nightImg = "https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80"; document.body.style.backgroundImage = `url(${hour >= 6 && hour < 18 ? dayImg : nightImg})`;}
+
+// --- 地图和控件交互 ---
+function initMap() { map = L.map('map', { attributionControl: false }).setView([lat, lon], 6); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); marker = L.marker([lat, lon]).addTo(map); map.on('click', e => { lat = e.latlng.lat; lon = e.latlng.lng; marker.setLatLng(e.latlng); fetchWeatherAndElevation(); });}
+async function searchAddress() { const addr = getEl("address").value.trim(); if (!addr) return; try { const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`); if (!res.ok) throw new Error(`地址查询服务错误`); const data = await res.json(); if (data.length > 0) { lat = parseFloat(data[0].lat); lon = parseFloat(data[0].lon); map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); } else { alert("未找到该地址"); } } catch (e) { alert(`地址查询失败: ${e.message}`); }}
+function populateDateSelector(hourlyTime) { const selector = getEl("daySelector"); const firstDay = hourlyTime[0].split('T')[0]; if (selector.options.length > 0 && selector.options[0].dataset.day === firstDay) { selector.value = selectedDayIndex; return; } selector.innerHTML = ""; const uniqueDays = [...new Set(hourlyTime.map(t => t.split('T')[0]))]; uniqueDays.slice(0, 7).forEach((day, index) => { const opt = document.createElement("option"); opt.value = index; opt.dataset.day = day; opt.textContent = new Date(day).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', weekday: 'short' }); if (index === 0) opt.textContent += " (今天)"; selector.appendChild(opt); }); selector.value = selectedDayIndex;}
+function dayChanged() { selectedDayIndex = parseInt(getEl("daySelector")?.value || 0); if(lastWeatherData) updateDisplay(lastWeatherData);}
+
+// --- 数据获取 ---
+async function fetchWeatherAndElevation() { getEl('weather-dashboard').innerHTML = `<div class="loading">正在获取海拔和天气数据...</div>`; getEl('hourly-forecast-list').innerHTML = ''; elevation = await getRealElevation(lat, lon); fetchWeatherWithFailover();}
+function fetchWeatherWithFailover(apiIndex = 0) { if (apiIndex >= API_ENDPOINTS.length) { getEl('weather-dashboard').innerHTML = `<div class="loading error-message">所有天气数据源均请求失败。</div>`; return; } const baseApiUrl = API_ENDPOINTS[apiIndex]; getEl('weather-dashboard').innerHTML = `<div class="loading">正在从数据源 ${apiIndex + 1} 加载...</div>`; const params = new URLSearchParams({ latitude: lat, longitude: lon, current: 'temperature_2m,relative_humidity_2m,cloudcover,visibility,wind_speed_10m,wind_direction_10m', hourly: 'temperature_2m,relative_humidity_2m,cloudcover,precipitation,visibility,precipitation_probability', daily: 'sunrise,sunset', timezone: 'Asia/Shanghai', model: 'icon_seamless,gfs_seamless' }); const url = `${baseApiUrl}/v1/forecast?${params.toString()}`; fetch(url).then(res => { if (!res.ok) throw new Error(`API 请求失败`); return res.json(); }).then(data => { if (!data?.hourly?.time) throw new Error("API 数据格式无效"); lastWeatherData = data; populateDateSelector(data.hourly.time); updateDisplay(data); }).catch(error => { console.error(`数据源 ${apiIndex + 1} 失败:`, error); fetchWeatherWithFailover(apiIndex + 1); });}
+
+// --- 核心：更新显示 ---
+function updateDisplay(data) {
+    const hourly = data.hourly;
+    const daily = data.daily;
+    const start = selectedDayIndex * 24;
+    setBackgroundByTime(hourly.time[start]);
+    let weatherHtml;
+    if (selectedDayIndex === 0 && data.current) {
+        const current = data.current;
+        const cloudBase = Math.round((current.temperature_2m - ((100 - current.relative_humidity_2m) / 5)) * 125);
+        const suggestion = (cloudBase < elevation && current.relative_humidity_2m > 85 && current.visibility > 8000);
+        weatherHtml = `<div class="weather-main"><div class="temp">${current.temperature_2m.toFixed(1)}°</div><div class="location">当前 · ${lat.toFixed(2)}, ${lon.toFixed(2)}</div></div><div class="weather-stats-grid"><div class="stat-card"><span class="icon">💧</span><div><div class="label">湿度</div><div class="value">${current.relative_humidity_2m.toFixed(0)}%</div></div></div><div class="stat-card"><span class="icon">☁️</span><div><div class="label">云量</div><div class="value">${current.cloudcover.toFixed(0)}%</div></div></div><div class="stat-card"><span class="icon">🌬️</span><div><div class="label">风速</div><div class="value">${current.wind_speed_10m.toFixed(1)} m/s</div></div></div><div class="stat-card"><span class="icon">👁️</span><div><div class="label">能见度</div><div class="value">${(current.visibility / 1000).toFixed(1)} km</div></div></div><div class="stat-card"><span class="icon">⛰️</span><div><div class="label">海拔</div><div class="value">${elevation} m</div></div></div><div class="stat-card"><span class="icon">🌫️</span><div><div class="label">云底高度</div><div class="value">${cloudBase} m</div></div></div></div><div class="forecast-card ${suggestion ? 'positive' : 'negative'}"><div class="title">今日云海预测</div><div class="result">${suggestion ? '很有可能出现云海！' : '云海可能性不大'}</div></div>`;
+    } else {
+        const dayTemps = hourly.temperature_2m.slice(start, start + 24); const dayHums = hourly.relative_humidity_2m.slice(start, start + 24); const dayVis = hourly.visibility.slice(start, start + 24);
+        const dayBases = dayTemps.map((t, i) => { const h = dayHums[i] || 0; const td = t - ((100 - h) / 5); return Math.round((t - td) * 125); });
+        const suggestion = (Math.min(...dayBases) < elevation && Math.max(...dayHums) > 85 && Math.max(...dayVis) > 8000);
+        weatherHtml = `<div class="weather-main"><div class="temp">${Math.max(...dayTemps).toFixed(1)}°<span style="color:#AAB;font-size:2rem;">/${Math.min(...dayTemps).toFixed(1)}°</span></div><div class="location">${new Date(daily.sunrise[selectedDayIndex]).toLocaleDateString('zh-CN', {month: 'short', day: 'numeric'})}</div></div><div class="weather-stats-grid"><div class="stat-card"><span class="icon">💧</span><div><div class="label">湿度</div><div class="value">${Math.min(...dayHums).toFixed(0)}-${Math.max(...dayHums).toFixed(0)}%</div></div></div><div class="stat-card"><span class="icon">☁️</span><div><div class="label">云量</div><div class="value">${Math.min(...hourly.cloudcover.slice(start, start + 24)).toFixed(0)}-${Math.max(...hourly.cloudcover.slice(start, start + 24)).toFixed(0)}%</div></div></div><div class="stat-card"><span class="icon">🌫️</span><div><div class="label">云底高度</div><div class="value">${Math.min(...dayBases)}-${Math.max(...dayBases)}m</div></div></div><div class="stat-card"><span class="icon">👁️</span><div><div class="label">能见度</div><div class="value">${(Math.min(...dayVis)/1000).toFixed(1)}-${(Math.max(...dayVis)/1000).toFixed(1)}km</div></div></div><div class="stat-card"><span class="icon">🌅</span><div><div class="label">日出</div><div class="value">${daily.sunrise[selectedDayIndex]?.slice(11)}</div></div></div><div class="stat-card"><span class="icon">🌇</span><div><div class="label">日落</div><div class="value">${daily.sunset[selectedDayIndex]?.slice(11)}</div></div></div></div><div class="forecast-card ${suggestion ? 'positive' : 'negative'}"><div class="title">全天云海预测</div><div class="result">${suggestion ? '很有可能出现云海！' : '云海可能性不大'}</div></div>`;
+    }
+    getEl('weather-dashboard').innerHTML = weatherHtml;
+    
+    let hourlyHtml = '';
+    for(let i=0; i < 24; i++) {
+        const hourIndex = start + i; if(hourIndex >= hourly.time.length) break;
+        const time = new Date(hourly.time[hourIndex]).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const temp = hourly.temperature_2m[hourIndex] || 0; const precipProb = hourly.precipitation_probability[hourIndex] || 0;
+        const hum = hourly.relative_humidity_2m[hourIndex] || 0; const base = Math.round((temp - ((100-hum)/5)) * 125);
+        hourlyHtml += `<div class="hour-item"><div class="time">${time}</div><div class="stat"><span>🌡️</span>${temp.toFixed(1)}°C</div><div class="stat"><span>🌫️</span>${base} m</div><div class="stat"><span>💧</span>${precipProb}%</div></div>`;
+    }
+    getEl('hourly-forecast-list').innerHTML = hourlyHtml || '<div class="loading">暂无逐小时数据</div>';
+}
+
+// --- SOS功能 ---
+const sosModal = getEl('sos-modal');
+const sosInfo = getEl('sos-info');
+const copySosBtn = getEl('copy-sos-btn');
+const closeSosBtn = getEl('close-sos-btn');
+
+function showSosModal() {
+    sosModal.style.display = 'flex';
+    sosInfo.innerHTML = '正在获取您的GPS位置...';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        const sosLat = pos.coords.latitude;
+        const sosLon = pos.coords.longitude;
+        const sosTime = new Date().toLocaleString('zh-CN');
+        const sosElevation = await getRealElevation(sosLat, sosLon);
+        const sosText = `紧急求救！\n经度: ${sosLat.toFixed(6)}\n纬度: ${sosLon.toFixed(6)}\n海拔: ${sosElevation}米\n时间: ${sosTime}`;
+        sosInfo.innerText = sosText;
+    }, (err) => {
+        sosInfo.innerText = `GPS定位失败！\n错误: ${err.message}\n请尝试移动到开阔地带。`;
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+copySosBtn.onclick = () => {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(sosInfo.innerText).then(() => alert('求救信息已复制到剪贴板！'), () => alert('复制失败！'));
+    } else { alert('您的浏览器不支持自动复制。'); }
+};
+closeSosBtn.onclick = () => { sosModal.style.display = 'none'; };
+
+// --- 定位和初始加载 ---
+function locateAndFetch() { getEl('weather-dashboard').innerHTML = `<div class="loading">正在获取您的当前位置...</div>`; navigator.geolocation.getCurrentPosition(pos => { lat = pos.coords.latitude; lon = pos.coords.longitude; map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); }, () => { alert("定位失败！"); fetchWeatherAndElevation(); });}
+initMap();
+fetchWeatherAndElevation();
+
+// --- PWA Service Worker 注册 ---
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+            console.log('ServiceWorker 注册成功: ', registration.scope);
+        }, err => {
+            console.log('ServiceWorker 注册失败: ', err);
+        });
+    });
+}
+</script>
+</body>
+</html>
