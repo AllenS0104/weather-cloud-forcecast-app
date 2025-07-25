@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>天气地图 + 云海分析</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -62,6 +62,26 @@
   .modal-button { display: inline-block; padding: 12px 25px; margin: 10px; font-size: 1.1rem; border-radius: 8px; border: none; cursor: pointer; text-decoration: none; }
   #prepare-sos-btn { background-color: var(--error-color); color: white; width: 80%; }
   #close-sos-btn { background-color: #ccc; color: #333; }
+  /* 【新增】媒体查询，专门为小屏幕设备优化 */
+@media (max-width: 768px) {
+  #app-container {
+    padding: 10px; /* 在手机上，边距可以小一点 */
+    gap: 15px;
+  }
+
+  #main-content {
+    /* 这是关键：在小屏幕上，强制主内容区变为单列布局 */
+    grid-template-columns: 1fr; 
+  }
+  
+  .card {
+    padding: 15px; /* 卡片内部的边距也小一点 */
+  }
+
+  h1 {
+    font-size: 1.5rem; /* 标题小一点 */
+  }
+}
 </style>
 </head>
 <body>
@@ -69,8 +89,8 @@
   <header class="card">
     <h1>🌤️ 天气地图 + 云海预测</h1>
     <div id="controls-section">
-      <input type="text" id="address" placeholder="输入地点 (默认: 北京)" onkeydown="if(event.key==='Enter') searchAddress()">
-      <button onclick="searchAddress()">确认</button>
+      <input type="text" id="address" placeholder="输入地点 (默认: 北京)">
+      <button id="search-btn">确认</button> 
       <button id="locate-btn" onclick="locateAndFetch()">📍 当前位置</button>
       <select id="daySelector" onchange="dayChanged()"></select>
     </div>
@@ -198,7 +218,33 @@ function fetchWeatherAndElevation() {
 function windDirection(deg) { const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']; return dirs[Math.round(deg / 45) % 8] + '风'; }
 function setBackgroundByTime(timeStr) { const hour = new Date(timeStr).getHours(); const dayImg = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1950&q=80"; const nightImg = "https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80"; document.body.style.backgroundImage = `url(${hour >= 6 && hour < 18 ? dayImg : nightImg})`; }
 function initMap() { const gaode = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', { subdomains: ["1", "2", "3", "4"], attribution: '高德地图' }); const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)' }); const esri_satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' }); const carto_light = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: 'CARTO', subdomains: 'abcd' }); const baseLayers = { "高德地图 (中文)": gaode, "地形图 (户外)": topo, "高清卫星图": esri_satellite, "简洁地图 (英文)": carto_light }; map = L.map('map', { layers: [gaode] }).setView([lat, lon], 6); L.control.layers(baseLayers).addTo(map); marker = L.marker([lat, lon]).addTo(map); map.on('click', e => { lat = e.latlng.lat; lon = e.latlng.lng; marker.setLatLng(e.latlng); fetchWeatherAndElevation(); }); }
-async function searchAddress() { const addressInput = getEl("address"); const addr = addressInput.value.trim(); if (!addr) return; addressInput.blur(); try { const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`); if (!res.ok) throw new Error(`地址查询服务错误`); const data = await res.json(); if (data.length > 0) { lat = parseFloat(data[0].lat); lon = parseFloat(data[0].lon); map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); } else { alert("未找到该地址"); } } catch (e) { alert(`地址查询失败: ${e.message}`); } }
+// 【修改】searchAddress 函数，增加 blur()
+async function searchAddress() {
+    const addressInput = getEl("address");
+    const addr = addressInput.value.trim();
+    
+    if (!addr) return;
+
+    // 【关键】主动让输入框失去焦点，这会触发键盘收起，对App环境很友好
+    addressInput.blur(); 
+    
+    try { 
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`);
+        if (!res.ok) throw new Error(`地址查询服务错误`);
+        const data = await res.json();
+        if (data.length > 0) {
+            lat = parseFloat(data[0].lat);
+            lon = parseFloat(data[0].lon);
+            map.setView([lat, lon], 9);
+            marker.setLatLng([lat, lon]);
+            fetchWeatherAndElevation();
+        } else {
+            alert("未找到该地址");
+        }
+    } catch (e) {
+        alert(`地址查询失败: ${e.message}`);
+    }
+}
 function populateDateSelector(hourlyTime) { const selector = getEl("daySelector"); const firstDay = hourlyTime[0].split('T')[0]; if (selector.options.length > 0 && selector.options[0].dataset.day === firstDay) { selector.value = selectedDayIndex; return; } selector.innerHTML = ""; const uniqueDays = [...new Set(hourlyTime.map(t => t.split('T')[0]))]; uniqueDays.slice(0, 7).forEach((day, index) => { const opt = document.createElement("option"); opt.value = index; opt.dataset.day = day; opt.textContent = new Date(day).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', weekday: 'short' }); if (index === 0) opt.textContent += " (今天)"; selector.appendChild(opt); }); selector.value = selectedDayIndex; }
 function dayChanged() { selectedDayIndex = parseInt(getEl("daySelector")?.value || 0); if (lastWeatherData) updateDisplay(lastWeatherData); }
 function fetchWeatherWithFailover(apiIndex = 0) { if (apiIndex >= API_ENDPOINTS.length) { getEl('weather-dashboard').innerHTML = `<div class="loading error-message">所有天气数据源均请求失败。</div>`; return; } const baseApiUrl = API_ENDPOINTS[apiIndex]; getEl('weather-dashboard').innerHTML = `<div class="loading">正在从数据源 ${apiIndex + 1} 加载...</div>`; const params = new URLSearchParams({ latitude: lat, longitude: lon, current: 'temperature_2m,relative_humidity_2m,cloudcover,visibility,wind_speed_10m,wind_direction_10m', hourly: 'temperature_2m,relative_humidity_2m,cloudcover,precipitation,visibility,precipitation_probability', daily: 'sunrise,sunset', timezone: 'Asia/Shanghai', model: 'icon_seamless,gfs_seamless' }); const url = `${baseApiUrl}/v1/forecast?${params.toString()}`; fetch(url).then(res => { if (!res.ok) throw new Error(`API 请求失败`); return res.json(); }).then(data => { if (!data?.hourly?.time) throw new Error("API 数据格式无效"); lastWeatherData = data; populateDateSelector(data.hourly.time); updateDisplay(data); }).catch(error => { console.error(`数据源 ${apiIndex + 1} 失败:`, error); fetchWeatherWithFailover(apiIndex + 1); }); }
@@ -251,7 +297,24 @@ if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navi
 document.addEventListener('DOMContentLoaded', () => {
     initMap();
     fetchWeatherAndElevation();
-});
-</script>
+
+    // 【新增】统一的事件绑定逻辑
+    const addressInput = getEl('address');
+    const searchButton = getEl('search-btn'); // 使用新的ID
+
+    if (addressInput && searchButton) {
+        // 1. 为确认按钮绑定点击事件
+        searchButton.addEventListener('click', searchAddress);
+
+        // 2. 为输入框绑定回车键事件
+        addressInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                // 阻止默认的回车行为（比如表单提交）
+                event.preventDefault();
+                searchAddress();
+            }
+        });
+    }
+});</script>
 </body>
 </html>
