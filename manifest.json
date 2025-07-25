@@ -1,0 +1,20 @@
+{
+  "name": "天气地图与云海预测",
+  "short_name": "天气地图",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#14141e",
+  "theme_color": "#0095ff",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/fluency/192/000000/partly-cloudy-day.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://img.icons8.com/fluency/512/000000/partly-cloudy-day.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
