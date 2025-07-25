@@ -11,15 +11,42 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* 【添加】全局 Box Sizing 和根元素溢出控制 */
+  * {
+    box-sizing: border-box;
+  }
+  
+  html, body {
+    width: 100%;
+    overflow-x: hidden;
+  }
   :root {
     --primary-bg: rgba(20, 20, 30, 0.6); --border-color: rgba(255, 255, 255, 0.2); --text-color: #EAEAEA;
     --text-muted-color: #AAB; --accent-color: #0095ff; --success-color: #28a745; --error-color: #dc3545;
     --success-bg-color: rgba(40, 167, 69, 0.2); --neutral-color: #6c757d; --neutral-bg-color: rgba(108, 117, 125, 0.2);
   }
-  body { font-family: 'Poppins', sans-serif; margin: 0; padding: 20px; background-image: url('https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80'); background-size: cover; background-position: center; background-attachment: fixed; color: var(--text-color); transition: background-image 1s ease-in-out; }
-  .card { background: var(--primary-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 25px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2); animation: fadeIn 0.5s ease-in-out; }
+  body { font-family: 'Poppins', sans-serif; margin: 0; padding: 0; background-image: url('https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80'); background-size: cover; background-position: center; background-attachment: fixed; color: var(--text-color); transition: background-image 1s ease-in-out; }
+  /* 修改你的 .card 样式，增加 max-width */
+.card { 
+  background: var(--primary-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 25px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+  animation: fadeIn 0.5s ease-in-out;
+  max-width: 100%; /* 【添加】确保卡片不会比父容器更宽 */
+}
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-  #app-container { max-width: 1200px; margin: 0 auto; display: grid; gap: 20px; }
+  #app-container { 
+  max-width: 1200px; 
+  margin: 0 auto; 
+  display: grid; 
+  gap: 20px;
+  width: 100%; /* 【添加】确保容器总是尝试占满可用宽度 */
+  padding: 20px; /* 【修改】将 body 的 padding 移到这里，控制更精确 */
+}
   h1 { text-align: center; margin-bottom: 10px; font-weight: 600; }
   #controls-section { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; }
   #controls-section input, #controls-section select, #controls-section button { padding: 10px 15px; font-size: 16px; font-family: 'Poppins', sans-serif; border: 1px solid var(--border-color); border-radius: 8px; background-color: rgba(255, 255, 255, 0.1); color: var(--text-color); }
@@ -172,7 +199,14 @@ function initMap() {
     marker = L.marker([lat, lon]).addTo(map);
     map.on('click', e => { lat = e.latlng.lat; lon = e.latlng.lng; marker.setLatLng(e.latlng); fetchWeatherAndElevation(); });
 }
-async function searchAddress() { const addr = getEl("address").value.trim(); if (!addr) return; try { const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`); if (!res.ok) throw new Error(`地址查询服务错误`); const data = await res.json(); if (data.length > 0) { lat = parseFloat(data[0].lat); lon = parseFloat(data[0].lon); map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); } else { alert("未找到该地址"); } } catch (e) { alert(`地址查询失败: ${e.message}`); }}
+async function searchAddress() {
+    const addressInput = getEl("address");
+    const addr = addressInput.value.trim();
+    
+    if (!addr) return;
+
+    // 【关键改动】主动让输入框失去焦点
+    addressInput.blur(); try { const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&accept-language=zh-CN`); if (!res.ok) throw new Error(`地址查询服务错误`); const data = await res.json(); if (data.length > 0) { lat = parseFloat(data[0].lat); lon = parseFloat(data[0].lon); map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); } else { alert("未找到该地址"); } } catch (e) { alert(`地址查询失败: ${e.message}`); }}
 function populateDateSelector(hourlyTime) { const selector = getEl("daySelector"); const firstDay = hourlyTime[0].split('T')[0]; if (selector.options.length > 0 && selector.options[0].dataset.day === firstDay) { selector.value = selectedDayIndex; return; } selector.innerHTML = ""; const uniqueDays = [...new Set(hourlyTime.map(t => t.split('T')[0]))]; uniqueDays.slice(0, 7).forEach((day, index) => { const opt = document.createElement("option"); opt.value = index; opt.dataset.day = day; opt.textContent = new Date(day).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', weekday: 'short' }); if (index === 0) opt.textContent += " (今天)"; selector.appendChild(opt); }); selector.value = selectedDayIndex;}
 function dayChanged() { selectedDayIndex = parseInt(getEl("daySelector")?.value || 0); if(lastWeatherData) updateDisplay(lastWeatherData);}
 
