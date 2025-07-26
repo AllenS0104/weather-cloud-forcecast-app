@@ -177,8 +177,7 @@ async function doSearch(address) {
     try { 
         console.log(`[诊断] 准备 fetch Nominatim: https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}`);
         
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&accept-language=zh-CN`);
-        
+        const res = await fetch(`https://weather-app-proxy.lovemaki028.workers.dev?q=${encodeURIComponent(address)}&format=json&accept-language=zh-CN`);        
         console.log(`[诊断] Nominatim fetch 返回, 响应状态: ${res.status}, ok: ${res.ok}`);
 
         if (!res.ok) throw new Error(`地址查询服务错误, 状态码: ${res.status}`);
