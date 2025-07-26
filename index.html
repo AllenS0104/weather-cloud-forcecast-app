@@ -260,8 +260,17 @@ function locateAndFetch() {
 }
 
 // --- PWA Service Worker (可选) ---
-if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').then(reg => console.log('ServiceWorker 注册成功'), err => console.log('ServiceWorker 注册失败:', err)); }); }
-
+// --- 【修改后】PWA Service Worker 注册 ---
+if (!isInApp && 'serviceWorker' in navigator) { // <--- 关键修改：添加 !isInApp 条件
+    window.addEventListener('load', () => { 
+        navigator.serviceWorker.register('/sw.js').then(
+            reg => console.log('ServiceWorker 注册成功 (Web 环境)'), 
+            err => console.log('ServiceWorker 注册失败:', err)
+        ); 
+    }); 
+} else {
+    console.log("在 App 环境内，不注册 ServiceWorker。");
+}
 // --- 启动！ ---
 document.addEventListener('DOMContentLoaded', () => {
     initMap();
