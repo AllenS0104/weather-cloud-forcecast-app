@@ -167,28 +167,44 @@ function triggerSearch() {
 }
 
 // 函数 B: 真正执行搜索的函数，它接收一个地址作为参数
+// 【诊断版】doSearch 函数
 async function doSearch(address) {
-    console.log(`正在执行搜索，地址: ${address}`);
+    console.log(`[诊断] ==> 进入 doSearch, 地址: ${address}`);
     if (!address) return;
+
     getEl('weather-dashboard').innerHTML = `<div class="loading">正在搜索 ${address}...</div>`;
+    
     try { 
+        console.log(`[诊断] 准备 fetch Nominatim: https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}`);
+        
         const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&accept-language=zh-CN`);
-        if (!res.ok) throw new Error(`地址查询服务错误`);
+        
+        console.log(`[诊断] Nominatim fetch 返回, 响应状态: ${res.status}, ok: ${res.ok}`);
+
+        if (!res.ok) throw new Error(`地址查询服务错误, 状态码: ${res.status}`);
+        
         const data = await res.json();
+        console.log(`[诊断] Nominatim JSON 解析成功, 找到 ${data.length} 个结果`);
+
         if (data.length > 0) {
+            console.log("[诊断] 找到结果, 准备更新地图并获取天气");
             lat = parseFloat(data[0].lat);
             lon = parseFloat(data[0].lon);
             map.setView([lat, lon], 9);
             marker.setLatLng([lat, lon]);
             fetchWeatherAndElevation();
         } else {
+            console.log("[诊断] 未找到地址");
             alert("未找到该地址");
-            updateDisplay(lastWeatherData); // 搜索失败时恢复上一次的天气显示
+            updateDisplay(lastWeatherData); 
         }
     } catch (e) {
+        console.error("[诊断] doSearch 发生严重错误:", e);
         alert(`地址查询失败: ${e.message}`);
-        updateDisplay(lastWeatherData); // 搜索失败时恢复上一次的天气显示
+        updateDisplay(lastWeatherData);
     }
+    console.log(`[诊断] <== 退出 doSearch`);
+
 }
 
 // 把 doSearch 挂载到 window 对象上，以便原生代码可以调用它
