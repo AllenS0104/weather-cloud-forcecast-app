@@ -99,6 +99,39 @@
 </div>
 
 <script>
+// 放在最前面，确保 handleGeocodeData 已定义
+function handleGeocodeData(data) {
+    const results = data.results ? data.results : data;
+    if (!results || !results.length) {
+        alert("未找到地址");
+        return;
+    }
+    const item = results[0];
+    lat = item.latitude;
+    lon = item.longitude;
+    if (map && marker) {
+        map.setView([lat, lon], 9);
+        marker.setLatLng([lat, lon]);
+    }
+    fetchWeatherAndElevation();
+}
+
+window.onGeocodeResult = function(data, error) {
+    alert("onGeocodeResult触发: " + error + "，data=" + JSON.stringify(data));
+    if (error) {
+        alert(`地址查询失败: ${error}`);
+        updateDisplay(lastWeatherData);
+        return;
+    }
+    if (data) {
+        try {
+            handleGeocodeData(data);
+        } catch (e) {
+            alert("解析原生返回的 geocode 数据失败: " + e.message);
+            updateDisplay(lastWeatherData);
+        }
+    }
+};
 // --- 全局变量 ---
 let map, marker;
 let lat = 39.9042, lon = 116.4074;
