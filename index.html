@@ -188,33 +188,23 @@ window.onGeocodeResult = (jsonString, error) => {
     }
 };
 
-// 函数 B: 这是 Web 环境下使用的 fetch 版本
+// 【最终版】函数 B: 这是 Web 环境下使用的 fetch 版本
+// 我们将它切换到 Open-Meteo Geocoding API
 async function doSearchWithFetch(address) {
+    console.log(`[诊断] 使用 Open-Meteo Geocoding API 搜索: ${address}`);
     try { 
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&accept-language=zh-CN`);
+        // 【核心修改】URL从 Nominatim 换成了 Open-Meteo
+        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(address)}&count=1&language=zh&format=json`);
+        
         if (!res.ok) throw new Error(`地址查询服务错误, 状态码: ${res.status}`);
+        
         const data = await res.json();
-        handleGeocodeData(data);
+        
+        // Open-Meteo 的返回格式是 data.results
+        handleGeocodeData(data.results); 
     } catch (e) {
         console.error("[诊断] Web fetch 发生错误:", e);
         alert(`地址查询失败: ${e.message}`);
-        updateDisplay(lastWeatherData);
-    }
-}
-
-// 新增：统一处理地理编码数据的函数，避免代码重复
-function handleGeocodeData(data) {
-    console.log(`[诊断] Nominatim JSON 解析成功, 找到 ${data.length} 个结果`);
-    if (data && data.length > 0) {
-        console.log("[诊断] 找到结果, 准备更新地图并获取天气");
-        lat = parseFloat(data[0].lat);
-        lon = parseFloat(data[0].lon);
-        map.setView([lat, lon], 9);
-        marker.setLatLng([lat, lon]);
-        fetchWeatherAndElevation();
-    } else {
-        console.log("[诊断] 未找到地址");
-        alert("未找到该地址");
         updateDisplay(lastWeatherData);
     }
 }
