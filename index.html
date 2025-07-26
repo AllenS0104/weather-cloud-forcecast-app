@@ -60,8 +60,8 @@
     <div id="controls-section">
       <input type="text" id="address" placeholder="输入地点 (默认: 北京)">
       <button id="search-btn">确认</button> 
-      <button id="locate-btn" onclick="locateAndFetch()">📍 当前位置</button>
-      <select id="daySelector" onchange="dayChanged()"></select>
+      <button id="locate-btn">📍 当前位置</button>
+      <select id="daySelector"></select>
     </div>
   </header>
   <main id="main-content">
@@ -80,7 +80,7 @@
         </div>
         <div id="hourly-forecast-list"></div>
       </div>
-      <button id="sos-button" onclick="showSosModal()">🆘 SOS 紧急求救</button>
+      <button id="sos-button">🆘 SOS 紧急求救</button>
     </section>
   </main>
 </div>
@@ -110,7 +110,7 @@ const API_ENDPOINTS = ['https://api.open-meteo.com', 'https://ensemble-api.open-
 const getEl = (id) => document.getElementById(id);
 
 // --- 环境检测与统一接口 ---
-const isInApp = window.AndroidBridge && typeof window.AndroidBridge.getCurrentPosition === 'function';
+const isInApp = !!(window.AndroidBridge && typeof window.AndroidBridge.getCurrentPosition === 'function');
 console.log(`当前是否在App环境内: ${isInApp}`);
 
 function getDeviceLocation(successCallback, errorCallback) {
@@ -132,7 +132,7 @@ function getDeviceLocation(successCallback, errorCallback) {
 function getRealElevation(lat, lon) {
     return new Promise((resolve, reject) => {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const timeoutId = setTimeout(() => { controller.abort(); reject(new Error("获取海拔超时")); }, 5000);
         fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`, { signal: controller.signal })
             .then(res => { clearTimeout(timeoutId); if (!res.ok) throw new Error(`海拔API错误: ${res.statusText}`); return res.json(); })
             .then(data => { const elevationResult = data.results?.[0]?.elevation; if (elevationResult !== undefined && elevationResult !== null) { resolve(elevationResult); } else { throw new Error("海拔API返回数据格式无效"); } })
@@ -150,64 +150,74 @@ function fetchWeatherAndElevation() {
         .finally(() => { console.log("即将调用 fetchWeatherWithFailover"); fetchWeatherWithFailover(); });
 }
 
-// --- 【诊断版】搜索逻辑 ---
-// 函数 A: 负责从输入框获取文本，并调用原生桥接或直接执行
+// --- 【最终版】搜索逻辑 ---
+// 函数 A: 触发器，调用原生桥接或 Web fetch
 function triggerSearch() {
     const addressInput = getEl("address");
     const addr = addressInput.value.trim();
     if (!addr) return;
     addressInput.blur(); 
-    if (isInApp && window.AndroidBridge.performSearch) {
-        console.log(`通过原生桥接发起搜索: ${addr}`);
-        window.AndroidBridge.performSearch(addr);
+    getEl('weather-dashboard').innerHTML = `<div class="loading">正在搜索 ${addr}...</div>`;
+    if (isInApp && window.AndroidBridge.fetchGeocode) {
+        console.log(`[诊断] 通过原生 OkHttp 发起地理编码请求: ${addr}`);
+        window.AndroidBridge.fetchGeocode(addr);
     } else {
-        console.log(`在 Web 环境中直接搜索: ${addr}`);
-        doSearch(addr);
+        console.log(`[诊断] 在 Web 环境下使用 fetch 搜索: ${addr}`);
+        doSearchWithFetch(addr);
     }
 }
 
-// 函数 B: 真正执行搜索的函数，它接收一个地址作为参数
-// 【诊断版】doSearch 函数
-async function doSearch(address) {
-    console.log(`[诊断] ==> 进入 doSearch, 地址: ${address}`);
-    if (!address) return;
-
-    getEl('weather-dashboard').innerHTML = `<div class="loading">正在搜索 ${address}...</div>`;
-    
-    try { 
-        console.log(`[诊断] 准备 fetch Nominatim: https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}`);
-        
-        const res = await fetch(`https://weather-app-proxy.lovemaki028.workers.dev?q=${encodeURIComponent(address)}&format=json&accept-language=zh-CN`);        
-        console.log(`[诊断] Nominatim fetch 返回, 响应状态: ${res.status}, ok: ${res.ok}`);
-
-        if (!res.ok) throw new Error(`地址查询服务错误, 状态码: ${res.status}`);
-        
-        const data = await res.json();
-        console.log(`[诊断] Nominatim JSON 解析成功, 找到 ${data.length} 个结果`);
-
-        if (data.length > 0) {
-            console.log("[诊断] 找到结果, 准备更新地图并获取天气");
-            lat = parseFloat(data[0].lat);
-            lon = parseFloat(data[0].lon);
-            map.setView([lat, lon], 9);
-            marker.setLatLng([lat, lon]);
-            fetchWeatherAndElevation();
-        } else {
-            console.log("[诊断] 未找到地址");
-            alert("未找到该地址");
-            updateDisplay(lastWeatherData); 
+// 新增：一个全局的回调函数，用于接收来自 App 的地理编码结果
+window.onGeocodeResult = (jsonString, error) => {
+    if (error) {
+        console.error("[诊断] 原生 OkHttp 请求失败:", error);
+        alert(`地址查询失败: ${error}`);
+        updateDisplay(lastWeatherData);
+        return;
+    }
+    if (jsonString) {
+        console.log("[诊断] 从原生 App 成功接收到地理编码 JSON 字符串");
+        try {
+            const data = JSON.parse(jsonString);
+            handleGeocodeData(data);
+        } catch (e) {
+            console.error("[诊断] 解析原生返回的 JSON 失败:", e);
+            alert("解析地理编码数据失败");
+            updateDisplay(lastWeatherData);
         }
+    }
+};
+
+// 函数 B: 这是 Web 环境下使用的 fetch 版本
+async function doSearchWithFetch(address) {
+    try { 
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&accept-language=zh-CN`);
+        if (!res.ok) throw new Error(`地址查询服务错误, 状态码: ${res.status}`);
+        const data = await res.json();
+        handleGeocodeData(data);
     } catch (e) {
-        console.error("[诊断] doSearch 发生严重错误:", e);
+        console.error("[诊断] Web fetch 发生错误:", e);
         alert(`地址查询失败: ${e.message}`);
         updateDisplay(lastWeatherData);
     }
-    console.log(`[诊断] <== 退出 doSearch`);
-
 }
 
-// 把 doSearch 挂载到 window 对象上，以便原生代码可以调用它
-window.doSearch = doSearch;
+// 新增：统一处理地理编码数据的函数，避免代码重复
+function handleGeocodeData(data) {
+    console.log(`[诊断] Nominatim JSON 解析成功, 找到 ${data.length} 个结果`);
+    if (data && data.length > 0) {
+        console.log("[诊断] 找到结果, 准备更新地图并获取天气");
+        lat = parseFloat(data[0].lat);
+        lon = parseFloat(data[0].lon);
+        map.setView([lat, lon], 9);
+        marker.setLatLng([lat, lon]);
+        fetchWeatherAndElevation();
+    } else {
+        console.log("[诊断] 未找到地址");
+        alert("未找到该地址");
+        updateDisplay(lastWeatherData);
+    }
+}
 
 // --- 其他函数 (无重大修改) ---
 function windDirection(deg) { const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']; return dirs[Math.round(deg / 45) % 8] + '风'; }
@@ -222,70 +232,52 @@ function updateDisplay(data) { if (!data) return; const hourly = data.hourly, da
 const sosModal = getEl('sos-modal');
 function resetSosModal() { getEl('sos-title').innerText = '紧急求救'; getEl('sos-instruction').style.display = 'block'; getEl('sos-instruction').innerText = '点击下方按钮，准备生成包含您当前位置的求救信息。'; getEl('prepare-sos-btn').style.display = 'block'; getEl('sos-info-container').style.display = 'none'; getEl('sos-info').innerText = ''; getEl('sos-actions').innerHTML = ''; }
 function showSosModal() { resetSosModal(); sosModal.style.display = 'flex'; }
-getEl('prepare-sos-btn').onclick = function() {
-    this.style.display = 'none';
-    getEl('sos-instruction').innerText = '正在获取您的GPS位置，请稍候...';
-    getDeviceLocation(async (pos) => {
-        const sosLat = pos.coords.latitude, sosLon = pos.coords.longitude;
-        const sosTime = new Date().toLocaleString('zh-CN');
-        let sosElevation = 'N/A (离线)';
-        try { sosElevation = (await getRealElevation(sosLat, sosLon)) + ' 米'; } catch (e) { console.error("离线无法获取海拔"); }
-        let locationName = 'N/A (离线)';
-        try { const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${sosLat}&lon=${sosLon}&accept-language=zh-CN`); if (res.ok) { locationName = (await res.json()).display_name || '未知区域'; } } catch (e) { console.error("离线无法获取位置描述"); }
-        const sosText = `紧急求救 (SOS)\n--------------------\n📍 位置描述:\n${locationName}\n--------------------\n🛰️ 精确坐标:\n纬度: ${sosLat.toFixed(6)}\n经度: ${sosLon.toFixed(6)}\n--------------------\n⛰️ 海拔高度: ${sosElevation}\n--------------------\n🕒 时间: ${sosTime}`.trim();
-        getEl('sos-instruction').style.display = 'none'; getEl('sos-info').innerText = sosText; getEl('sos-info-container').style.display = 'block';
-        const encodedText = encodeURIComponent(sosText);
-        getEl('sos-actions').innerHTML = `<a href="sms:?body=${encodedText}" class="modal-button" style="background-color: var(--success-color); color: white;">通过短信发送</a><a href="mailto:?subject=紧急求救 (SOS)&body=${encodedText}" class="modal-button" style="background-color: var(--accent-color); color: white;">通过邮件发送</a><button id="copy-sos-btn" class="modal-button" style="background-color: #6c757d; color: white;">复制文本</button>`;
-        getEl('copy-sos-btn').onclick = () => { navigator.clipboard.writeText(sosText).then(() => alert('求救信息已复制！'), () => alert('复制失败！')); };
-    }, (err) => {
-        getEl('sos-instruction').innerText = `GPS定位失败！\n错误: ${err.message}\n请移到开阔地带，或检查手机定位权限。`;
-    });
-};
-getEl('close-sos-btn').onclick = () => { sosModal.style.display = 'none'; };
+function locateAndFetch() { getEl('weather-dashboard').innerHTML = `<div class="loading">正在获取您的当前位置...</div>`; getDeviceLocation(pos => { lat = pos.coords.latitude; lon = pos.coords.longitude; map.setView([lat, lon], 9); marker.setLatLng([lat, lon]); fetchWeatherAndElevation(); }, () => { alert("定位失败！将使用默认位置。"); fetchWeatherAndElevation(); }); }
 
-// --- 定位和初始加载 ---
-function locateAndFetch() {
-    getEl('weather-dashboard').innerHTML = `<div class="loading">正在获取您的当前位置...</div>`;
-    getDeviceLocation(pos => {
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
-        map.setView([lat, lon], 9);
-        marker.setLatLng([lat, lon]);
-        fetchWeatherAndElevation();
-    }, () => {
-        alert("定位失败！将使用默认位置。");
-        fetchWeatherAndElevation();
-    });
-}
-
-// --- PWA Service Worker (可选) ---
-// --- 【修改后】PWA Service Worker 注册 ---
-if (!isInApp && 'serviceWorker' in navigator) { // <--- 关键修改：添加 !isInApp 条件
-    window.addEventListener('load', () => { 
-        navigator.serviceWorker.register('/sw.js').then(
-            reg => console.log('ServiceWorker 注册成功 (Web 环境)'), 
-            err => console.log('ServiceWorker 注册失败:', err)
-        ); 
-    }); 
-} else {
-    console.log("在 App 环境内，不注册 ServiceWorker。");
-}
-// --- 启动！ ---
+// --- 启动与事件绑定 ---
 document.addEventListener('DOMContentLoaded', () => {
     initMap();
     fetchWeatherAndElevation();
 
-    const addressInput = getEl('address');
-    const searchButton = getEl('search-btn');
-
-    if (addressInput && searchButton) {
-        searchButton.addEventListener('click', triggerSearch);
-        addressInput.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                triggerSearch();
-            }
+    // 绑定所有事件
+    getEl('search-btn')?.addEventListener('click', triggerSearch);
+    getEl('address')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); triggerSearch(); }
+    });
+    getEl('locate-btn')?.addEventListener('click', locateAndFetch);
+    getEl('daySelector')?.addEventListener('change', dayChanged);
+    getEl('sos-button')?.addEventListener('click', showSosModal);
+    getEl('prepare-sos-btn')?.addEventListener('click', function() {
+        this.style.display = 'none';
+        getEl('sos-instruction').innerText = '正在获取您的GPS位置，请稍候...';
+        getDeviceLocation(async (pos) => {
+            const sosLat = pos.coords.latitude, sosLon = pos.coords.longitude;
+            const sosTime = new Date().toLocaleString('zh-CN');
+            let sosElevation = 'N/A (离线)';
+            try { sosElevation = (await getRealElevation(sosLat, sosLon)) + ' 米'; } catch (e) { console.error("离线无法获取海拔"); }
+            let locationName = 'N/A (离线)';
+            try { const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${sosLat}&lon=${sosLon}&accept-language=zh-CN`); if (res.ok) { locationName = (await res.json()).display_name || '未知区域'; } } catch (e) { console.error("离线无法获取位置描述"); }
+            const sosText = `紧急求救 (SOS)\n--------------------\n📍 位置描述:\n${locationName}\n--------------------\n🛰️ 精确坐标:\n纬度: ${sosLat.toFixed(6)}\n经度: ${sosLon.toFixed(6)}\n--------------------\n⛰️ 海拔高度: ${sosElevation}\n--------------------\n🕒 时间: ${sosTime}`.trim();
+            getEl('sos-instruction').style.display = 'none'; getEl('sos-info').innerText = sosText; getEl('sos-info-container').style.display = 'block';
+            const encodedText = encodeURIComponent(sosText);
+            getEl('sos-actions').innerHTML = `<a href="sms:?body=${encodedText}" class="modal-button" style="background-color: var(--success-color); color: white;">通过短信发送</a><a href="mailto:?subject=紧急求救 (SOS)&body=${encodedText}" class="modal-button" style="background-color: var(--accent-color); color: white;">通过邮件发送</a><button id="copy-sos-btn" class="modal-button" style="background-color: #6c757d; color: white;">复制文本</button>`;
+            getEl('copy-sos-btn').onclick = () => { navigator.clipboard.writeText(sosText).then(() => alert('求救信息已复制！'), () => alert('复制失败！')); };
+        }, (err) => {
+            getEl('sos-instruction').innerText = `GPS定位失败！\n错误: ${err.message}\n请移到开阔地带，或检查手机定位权限。`;
         });
+    });
+    getEl('close-sos-btn')?.addEventListener('click', () => { sosModal.style.display = 'none'; });
+
+    // PWA Service Worker 注册
+    if (!isInApp && 'serviceWorker' in navigator) {
+        window.addEventListener('load', () => { 
+            navigator.serviceWorker.register('/sw.js').then(
+                reg => console.log('ServiceWorker 注册成功 (Web 环境)'), 
+                err => console.log('ServiceWorker 注册失败:', err)
+            ); 
+        }); 
+    } else {
+        console.log("在 App 环境内，不注册 ServiceWorker。");
     }
 });
 </script>
