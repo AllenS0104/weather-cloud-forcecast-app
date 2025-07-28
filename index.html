@@ -152,7 +152,21 @@ function getDeviceLocation(successCallback, errorCallback) {
         console.log("使用原生App的定位功能");
         const callbackName = `locationCallback_${Date.now()}`;
         window[callbackName] = (position) => { console.log("原生App回传了位置", position); successCallback(position); delete window[callbackName]; };
-        window.onLocationError = (errorMsg) => { console.error("原生App回传了错误", errorMsg); errorCallback({ message: errorMsg }); delete window.onLocationError; };
+        window.onLocationError = (errorMsg) => {
+    console.warn('[原生定位失败]', errorMsg, '→ 尝试浏览器定位');
+    // 兜底：用浏览器 Geolocation API
+    navigator.geolocation.getCurrentPosition(
+        successCallback,
+        err => {
+            console.error('[浏览器定位也失败]', err.message);
+            alert('定位失败：' + errorMsg + '，已使用默认位置');
+            // 返回北京天安门作为默认
+            successCallback({ coords: { latitude: 39.9042, longitude: 116.4074 } });
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+    delete window.onLocationError;
+};
         window.onPermissionResult = (granted) => { if (granted) { window.AndroidBridge.getCurrentPosition(callbackName); } else { errorCallback({ message: '用户拒绝了定位权限' }); } delete window.onPermissionResult; };
         window.AndroidBridge.getCurrentPosition(callbackName);
     } else {
@@ -221,24 +235,38 @@ window.onGeocodeResult = (data, error) => {
 // 【最终版】函数 B: 这是 Web 环境下使用的 fetch 版本
 // 我们将它切换到 Open-Meteo Geocoding API
 async function doSearchWithFetch(address) {
-    console.log(`[诊断] 使用 Open-Meteo Geocoding API 搜索: ${address}`);
-    try { 
-        // 【核心修改】URL从 Nominatim 换成了 Open-Meteo
-        const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(address)}&count=1&language=zh&format=json`);
-        
-        if (!res.ok) throw new Error(`地址查询服务错误, 状态码: ${res.status}`);
-        
+    console.log('[诊断] 开始搜索：' + address);
+
+    // 1️⃣ 先尝试 Open-Meteo
+    try {
+        const res = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(address)}&count=1&language=zh&format=json`
+        );
         const data = await res.json();
-        
-        // Open-Meteo 的返回格式是 data.results
-        handleGeocodeData(data.results); 
+        if (data.results?.length) {
+            handleGeocodeData(data.results);
+            return;
+        }
     } catch (e) {
-        console.error("[诊断] Web fetch 发生错误:", e);
-        alert(`地址查询失败: ${e.message}`);
-        updateDisplay(lastWeatherData);
+        console.warn('[Open-Meteo] 失败，退回到 Nominatim');
+    }
+
+    // 2️⃣ 退回到 Nominatim（支持中文小地址）
+    try {
+        const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&accept-language=zh-CN`
+        );
+        const data = await res.json();
+        if (data.length) {
+            const d = data[0];
+            handleGeocodeData([{ latitude: +d.lat, longitude: +d.lon, name: d.display_name }]);
+        } else {
+            alert('未找到该地址，请尝试更简单的关键词（如“北京”或“上海”）');
+        }
+    } catch (e) {
+        alert('地址查询网络错误：' + e.message);
     }
 }
-
 // --- 其他函数 (无重大修改) ---
 function windDirection(deg) { const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']; return dirs[Math.round(deg / 45) % 8] + '风'; }
 function setBackgroundByTime(timeStr) { const hour = new Date(timeStr).getHours(); const dayImg = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1950&q=80"; const nightImg = "https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80"; document.body.style.backgroundImage = `url(${hour >= 6 && hour < 18 ? dayImg : nightImg})`; }
