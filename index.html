@@ -316,17 +316,42 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     getEl('close-sos-btn')?.addEventListener('click', () => { sosModal.style.display = 'none'; });
 
-    // PWA Service Worker 注册
-    if (!isInApp && 'serviceWorker' in navigator) {
-        window.addEventListener('load', () => { 
-            navigator.serviceWorker.register('/sw.js').then(
-                reg => console.log('ServiceWorker 注册成功 (Web 环境)'), 
-                err => console.log('ServiceWorker 注册失败:', err)
-            ); 
-        }); 
-    } else {
-        console.log("在 App 环境内，不注册 ServiceWorker。");
-    }
+// 1. 统一 GPS 自动定位
+function autoGetLocation () {
+  if (!navigator.geolocation) {
+    console.warn('当前环境不支持 geolocation');
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const { latitude, longitude } = pos.coords;
+      console.log('GPS 定位成功：', latitude, longitude);
+      // todo: 把坐标存到全局变量 / Vuex / Redux 等
+    },
+    err => {
+      console.error('GPS 定位失败：', err);
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  );
+}
+
+// 2. 只在 Web 端注册 Service Worker
+function registerSW () {
+  if (!isInApp && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('ServiceWorker 注册成功 (Web 环境)'))
+        .catch(err => console.error('ServiceWorker 注册失败:', err));
+    });
+  } else {
+    console.log('在 App 环境内，不注册 ServiceWorker。');
+  }
+}
+
+// 3. 入口
+autoGetLocation();   // App & Web 都会执行
+registerSW();        // 仅 Web 会注册 SW
 });
 </script>
 </body>
