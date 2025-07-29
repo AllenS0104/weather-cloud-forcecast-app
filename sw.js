@@ -1,42 +1,47 @@
-// sw.js (Service Worker)
-
-const CACHE_NAME = 'weather-app-cache-v1';
-// 需要缓存的核心文件列表
-const urlsToCache = [
+// sw.js
+const CACHE_NAME = 'weather-app-v1';   // 每次改文件后把 v1 → v2
+const PRECACHE_LIST = [
   '/',
   '/index.html',
-  // 注意：我们不再缓存CSS和JS，因为它们都内联在HTML里了。
-  // 但如果未来你把它们分离出来，就需要在这里添加路径。
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80',
-  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1950&q=80'
+  // 其他首屏必须资源 …
 ];
 
-// 监听 install 事件，在其中缓存核心文件
-self.addEventListener('install', event => {
-  event.waitUntil(
+/* 安装阶段：预缓存 */
+self.addEventListener('install', e => {
+  self.skipWaiting();                       // 立即接管
+  e.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
+      .then(cache => cache.addAll(PRECACHE_LIST))
   );
 });
 
-// 监听 fetch 事件，拦截所有网络请求
-self.addEventListener('fetch', event => {
-  event.respondWith(
-    // 先尝试从缓存中寻找匹配的响应
-    caches.match(event.request)
-      .then(response => {
-        // 如果缓存中有，则直接返回缓存的响应
-        if (response) {
-          return response;
-        }
-        // 如果缓存中没有，则发起网络请求
-        return fetch(event.request);
-      }
-    )
+/* 激活阶段：清理旧缓存 */
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys.filter(k => k !== CACHE_NAME)
+            .map(k => caches.delete(k))
+      )
+    ).then(() => self.clients.claim())      // 立即对现有页面生效
+  );
+});
+
+/* 拦截请求：缓存优先 → 后台更新 */
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;   // 只缓存 GET
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      const networked = fetch(e.request).then(response => {
+        const resClone = response.clone();
+        caches.open(CACHE_NAME)
+          .then(cache => cache.put(e.request, resClone));
+        return response;
+      });
+      // 有缓存先用，没缓存就等网络
+      return cached || networked;
+    })
   );
 });
